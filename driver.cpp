@@ -468,22 +468,22 @@ gpu_bsw_driver::kernel_driver_aa(std::vector<std::string> reads, std::vector<std
           gpu_bsw::sequence_aa_kernel_traceback<<<sequences_per_stream, minSize, ShmemBytes, streams_cuda[0]>>>(
                 strA_d, strB_d, gpu_data.offset_ref_gpu, gpu_data.offset_query_gpu, gpu_data.ref_start_gpu,
                 gpu_data.ref_end_gpu, gpu_data.query_start_gpu, gpu_data.query_end_gpu, gpu_data.scores_gpu, 
-                gpu_data.longCIGAR_gpu, gpu_data.CIGAR_gpu, gpu_data.H_ptr_gpu,
+                gpu_data.longCIGAR_gpu, gpu_data.CIGAR_gpu, gpu_data.H_ptr_gpu,gpu_data.I_gpu,
                 maxCIGAR, maxMatrixSize, openGap, extendGap, d_scoring_matrix, d_encoding_matrix);
             cudaErrchk(cudaGetLastError());
 
-          gpu_bsw::sequence_aa_kernel_traceback<<<sequences_per_stream, minSize, ShmemBytes, streams_cuda[0]>>>(
-                strA_d + half_length_A, strB_d + half_length_B, gpu_data.offset_ref_gpu + sequences_per_stream, gpu_data.offset_query_gpu + sequences_per_stream,
-                gpu_data.ref_start_gpu + sequences_per_stream, gpu_data.ref_end_gpu + sequences_per_stream, gpu_data.query_start_gpu + sequences_per_stream, gpu_data.query_end_gpu + sequences_per_stream,
-                gpu_data.scores_gpu + sequences_per_stream, gpu_data.longCIGAR_gpu + sequences_per_stream * maxCIGAR, gpu_data.CIGAR_gpu + sequences_per_stream * maxCIGAR , 
-                gpu_data.H_ptr_gpu + sequences_per_stream * maxMatrixSize, maxCIGAR, maxMatrixSize,
-                openGap, extendGap, d_scoring_matrix, d_encoding_matrix);
+          //gpu_bsw::sequence_aa_kernel_traceback<<<sequences_per_stream, minSize, ShmemBytes, streams_cuda[0]>>>(
+          //      strA_d + half_length_A, strB_d + half_length_B, gpu_data.offset_ref_gpu + sequences_per_stream, gpu_data.offset_query_gpu + sequences_per_stream,
+          //      gpu_data.ref_start_gpu + sequences_per_stream, gpu_data.ref_end_gpu + sequences_per_stream, gpu_data.query_start_gpu + sequences_per_stream, gpu_data.query_end_gpu + sequences_per_stream,
+          //      gpu_data.scores_gpu + sequences_per_stream, gpu_data.longCIGAR_gpu + sequences_per_stream * maxCIGAR, gpu_data.CIGAR_gpu + sequences_per_stream * maxCIGAR , 
+          //      gpu_data.H_ptr_gpu + sequences_per_stream * maxMatrixSize, gpu_data.I_gpu + sequences_per_stream * maxMatrixSize, maxCIGAR, maxMatrixSize,
+          //      openGap, extendGap, d_scoring_matrix, d_encoding_matrix);
 
-            cudaErrchk(cudaGetLastError());
+          //  cudaErrchk(cudaGetLastError());
 
 
           cudaStreamSynchronize (streams_cuda[0]);
-          cudaStreamSynchronize (streams_cuda[1]);
+	  //cudaStreamSynchronize (streams_cuda[1]);
 
           auto sec_cpu_start = NOW;
           int newMin = get_new_min_length(alAend, alBend, blocksLaunched); // find the new largest of smaller lengths
@@ -500,8 +500,8 @@ gpu_bsw_driver::kernel_driver_aa(std::vector<std::string> reads, std::vector<std
                 top_scores_cpu += stringsPerIt;
                 CIGAR_cpu += stringsPerIt*maxCIGAR;
 
-		 cudaStreamSynchronize (streams_cuda[0]);
-     cudaStreamSynchronize (streams_cuda[1]);
+		cudaStreamSynchronize (streams_cuda[0]);
+                //cudaStreamSynchronize (streams_cuda[1]);
 
       }  // for iterations end here
 

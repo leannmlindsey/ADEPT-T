@@ -1159,7 +1159,7 @@ __global__ void
 gpu_bsw::sequence_aa_kernel_traceback(char* seqA_array, char* seqB_array, unsigned* prefix_lengthA,
                     unsigned* prefix_lengthB, short* seqA_align_begin, short* seqA_align_end,
                     short* seqB_align_begin, short* seqB_align_end, short* top_scores, char* longCIGAR_array, 
-                    char* CIGAR_array, char* H_ptr_array, int maxCIGAR, unsigned const maxMatrixSize, 
+                    char* CIGAR_array, char* H_ptr_array, short* I_ptr_array,int maxCIGAR, unsigned const maxMatrixSize, 
                     short startGap, short extendGap, short* scoring_matrix, short* encoding_matrix)
 {
   int block_Id  = blockIdx.x;
@@ -1176,6 +1176,7 @@ gpu_bsw::sequence_aa_kernel_traceback(char* seqA_array, char* seqB_array, unsign
 
   char* H_ptr;
   char* CIGAR, *longCIGAR;
+  short* I;
 
 
   extern __shared__ char is_valid_array[];
@@ -1201,6 +1202,7 @@ gpu_bsw::sequence_aa_kernel_traceback(char* seqA_array, char* seqB_array, unsign
   unsigned minSize = lengthSeqA < lengthSeqB ? lengthSeqA : lengthSeqB;
 
   H_ptr = H_ptr_array + (block_Id * maxMatrixSize);
+  I = I_ptr_array + (block_Id * maxMatrixSize);
 
   longCIGAR = longCIGAR_array + (block_Id * maxCIGAR);
   CIGAR = CIGAR_array + (block_Id * maxCIGAR);
@@ -1421,6 +1423,12 @@ gpu_bsw::sequence_aa_kernel_traceback(char* seqA_array, char* seqB_array, unsign
 
         short add_score = sh_aa_scoring[mat_index_q*24 + mat_index_r]; // doesnt really matter in what order these indices are used, since the scoring table is symmetrical
 
+         //if (block_Id == 0 && thread_Id == 6){
+         // printf("myColumnChar = %c\n",myColumnChar);
+         // printf("long_seq[i-1] = %c\n",longer_seq[i]);
+         // printf("q = %d, r = %d, score = %d\n", mat_index_q, mat_index_r, add_score);
+         //}
+
         short diag_score = final_prev_prev_H + add_score;
 
         _curr_H = findMaxFour(diag_score, _curr_F, _curr_E, 0, &ind);
@@ -1439,9 +1447,10 @@ gpu_bsw::sequence_aa_kernel_traceback(char* seqA_array, char* seqB_array, unsign
                 H_temp = H_temp & (~4);
         }
         H_ptr[diagOffset[diagId] + locOffset] =  H_temp;
+        I[diagOffset[diagId] + locOffset] = _curr_H;
 
         thread_max_i = (thread_max >= _curr_H) ? thread_max_i : i;
-        thread_max_j = (thread_max >= _curr_H) ? thread_max_j : thread_Id + 1;
+        thread_max_j = (thread_max >= _curr_H) ? thread_max_j : thread_Id;
         thread_max   = (thread_max >= _curr_H) ? thread_max : _curr_H;
         i++;
      }
@@ -1470,6 +1479,10 @@ gpu_bsw::sequence_aa_kernel_traceback(char* seqA_array, char* seqB_array, unsign
       seqA_align_end[block_Id] = thread_max_i;
       seqB_align_end[block_Id] = thread_max_j;
       top_scores[block_Id] = thread_max;
+      }
+
+      if (DEBUG_PRINT == 1) {
+        gpu_bsw::printMatrix(H_ptr, I, seqA, seqB, lengthSeqA, lengthSeqB, diagOffset, maxSize);
       }
 
       // unsigned short diagId    = current_i + current_j;
