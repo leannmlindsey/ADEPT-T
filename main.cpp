@@ -222,8 +222,7 @@ void dnaSampleRun(string refFile, string queFile, string out_file, char* resultF
   char* str_ptr;
 
   gpu_bsw_driver::kernel_driver_dna(G_sequencesB, G_sequencesA, &results_test, maxCIGAR, scores, 0.5);
-  
-  //unsigned long long int cigar_index;
+
   
   str_ptr = &results_test.CIGAR[0];
   for(int k = 0; k < G_sequencesA.size(); k++){
@@ -275,9 +274,10 @@ main(int argc, char* argv[])
   string in_arg = argv[1];
 
  if(in_arg == "aa"){
+	cout << "AA" << endl;
  	proteinSampleRun(argv[2], argv[3], argv[4], argv[5]);
  }else{
-	cout << "VTest branch DNA" << endl;
+	cout << "DNA" << endl;
  	dnaSampleRun(argv[2], argv[3], argv[4], argv[5]);
  }
 
