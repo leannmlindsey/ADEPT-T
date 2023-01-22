@@ -332,7 +332,7 @@ gpu_bsw::traceBack(short current_i, short current_j, char* seqA_array, char* seq
 
     }
 
-    unsigned short current_diagId;     // = current_i+current_j;
+    unsigned short current_diagId;     // = current_i+current_j/2;
     unsigned short current_locOffset;  // = 0;
     unsigned maxSize = lengthSeqA > lengthSeqB ? lengthSeqA : lengthSeqB;
    
@@ -809,7 +809,7 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
           }
           H_val = H_temp_top << 4 | H_temp;
           //if (thread_Id == 6) printf("H_temp_top = %x, shifted = %x, H_temp = %x, combined = %x\n", H_temp_top, H_temp_top <<4, H_temp, H_val);
-          H_ptr[diagOffset[diagId] + locOffset] =  H_val;
+          if (thread_Id%2 != 0)H_ptr[diagOffset[diagId] + locOffset] =  H_val;
       
           thread_max_i = (thread_max >= _curr_H) ? thread_max_i : i;
           thread_max_j = (thread_max >= _curr_H) ? thread_max_j : thread_Id;
@@ -841,10 +841,10 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
           top_scores[block_Id] = thread_max;
         }
         
-        // gpu_bsw::traceBack(current_i, current_j, seqA_array, seqB_array, prefix_lengthA, 
-        //             prefix_lengthB, seqA_align_begin, seqA_align_end,
-        //             seqB_align_begin, seqB_align_end, maxMatrixSize, maxCIGAR,
-        //             longCIGAR, CIGAR, H_ptr, diagOffset);
+        gpu_bsw::traceBack(current_i, current_j, seqA_array, seqB_array, prefix_lengthA, 
+                    prefix_lengthB, seqA_align_begin, seqA_align_end,
+                    seqB_align_begin, seqB_align_end, maxMatrixSize, maxCIGAR,
+                    longCIGAR, CIGAR, H_ptr, diagOffset);
 
     }
     __syncthreads();
