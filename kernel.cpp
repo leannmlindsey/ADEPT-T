@@ -572,7 +572,7 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
 
     char myColumnChar;
     // the shorter of the two strings is stored in thread registers
-    char H_temp = 0;  //temp value of H stored in register until H, E and F are set then written to global; set all bits to 0 initially
+    char H_temp = 0, H_val = 0;  //temp value of H stored in register until H, E and F are set then written to global; set all bits to 0 initially
 
     if(lengthSeqA < lengthSeqB)
     {
@@ -602,7 +602,7 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
 
     //create prefixSum table by cycling through the threads in batches
 
-    if (thread_Id == 0 ) printf("minSize = %d, maxSize = %d\n", minSize, maxSize);
+   
     if (thread_Id <= minSize){
       if (minSize%2 == 0){
         matrixWidth = minSize/2;
@@ -610,29 +610,29 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
       } else {
         matrixWidth = minSize/2+1;
       }
-      if (thread_Id == 0) printf("matrixWidth = %d\n",matrixWidth);
+      
       
     for (int cyc = 0; cyc <= (matrixWidth + maxSize+1)/(matrixWidth)+1; cyc++){
       
       int locDiagId = thread_Id+cyc*matrixWidth;
-      if(thread_Id == 2) printf("cyc = %d, locDiagId = %d\n", cyc, locDiagId);
+      
       if (locDiagId < maxSize + matrixWidth-1){
         if(locDiagId <= matrixWidth){
           locSum = (locDiagId) * (locDiagId + 1)/2;
           diagOffset[locDiagId]= locSum;
-          printf("LEFT CORNER inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d\n", thread_Id, cyc, locSum, locDiagId);
+          //printf("LEFT CORNER inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d\n", thread_Id, cyc, locSum, locDiagId);
         }
         else if (locDiagId > maxSize){
           int n = (maxSize+matrixWidth) - locDiagId-1;
           int finalcell = (maxSize) * (matrixWidth);
           locSum = finalcell - n*(n+1)/2;
           diagOffset[locDiagId] = locSum;
-          printf("RIGHT CORNER inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d, n=%d, finalcell=%d\n", thread_Id, cyc, locSum, locDiagId,n,finalcell);
+          //printf("RIGHT CORNER inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d, n=%d, finalcell=%d\n", thread_Id, cyc, locSum, locDiagId,n,finalcell);
         }
         else {
           locSum = ((matrixWidth)*(matrixWidth+1)/2) +(matrixWidth)*(locDiagId-matrixWidth);
           diagOffset[locDiagId] = locSum;
-          printf("MIDDLE SECTION inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d\n", thread_Id, cyc, locSum, locDiagId);
+          //printf("MIDDLE SECTION inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d\n", thread_Id, cyc, locSum, locDiagId);
         }
       }
     }
@@ -640,21 +640,21 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
     
     __syncthreads(); //to make sure prefixSum is calculated before the threads start calculations.    
 
-  if (block_Id == 0 && thread_Id == 0){
-       printf("lenA = %d, lenB = %d\n", lengthSeqA, lengthSeqB);
-    for (int q = 0; q < matrixWidth + maxSize-1; q++){
+  // if (block_Id == 0 && thread_Id == 0){
+  //      printf("lenA = %d, lenB = %d\n", lengthSeqA, lengthSeqB);
+  //   for (int q = 0; q < matrixWidth + maxSize-1; q++){
      
-      printf("index: %d, %d\n ", q, diagOffset[q]);
-    }
-    printf("FINISHED\n");
-  }
+  //     printf("index: %d, %d\n ", q, diagOffset[q]);
+  //   }
+  //   printf("FINISHED\n");
+  // }
 
   //initializing registers for storing diagonal values for three recent most diagonals (separate tables for H, E, F
     short _curr_H = 0, _curr_F = -100, _curr_E = -100; //-100 acts as neg infinity
     short _prev_H = 0, _prev_F = -100, _prev_E = -100;
     short _prev_prev_H = 0, _prev_prev_F = -100, _prev_prev_E = -100;
     short _temp_Val = 0;
-    //char prev_H_temp = 0;
+    char _prev_H_temp = 0;
 
    __shared__ short sh_prev_E[32]; // one such element is required per warp
    __shared__ short sh_prev_H[32];
@@ -665,8 +665,8 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
    __shared__ short local_spill_prev_prev_H[1024];
 
    //add the shared mem and spill locations for the 4bit values of HEF
-   //__shared__ char sh_prev_H_temp[32];
-   //__shared__ char local_spill_prev_H_temp[1024];
+   __shared__ char sh_prev_H_temp[32];
+   __shared__ char local_spill_prev_H_temp[1024];
 
     __syncthreads(); // to make sure all shmem allocations have been initialized
 
@@ -708,7 +708,7 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
         _prev_prev_F = _temp_Val;
         _curr_F = -100;
 
-        //prev_H_temp = H_temp;
+        _prev_H_temp = H_temp;
 
 
         if(laneId == 31)
@@ -716,7 +716,7 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
           sh_prev_E[warpId] = _prev_E;
           sh_prev_H[warpId] = _prev_H;
 		      sh_prev_prev_H[warpId] = _prev_prev_H;
-          //sh_4bitHEF[warpId] = prev_H_temp;
+          sh_prev_H_temp[warpId] = _prev_H_temp;
         }
 
         if(diag >= maxSize)
@@ -724,7 +724,7 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
           local_spill_prev_E[thread_Id] = _prev_E;
           local_spill_prev_H[thread_Id] = _prev_H;
           local_spill_prev_prev_H[thread_Id] = _prev_prev_H;
-          //local_spill_4bitHEF[thread_Id] = prev_H_temp;
+          local_spill_prev_H_temp[thread_Id] = _prev_H_temp;
         }
 
         __syncthreads(); // this is needed so that all the shmem writes are completed.
@@ -736,23 +736,28 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
           short hfVal = _prev_H + startGap;
           short valeShfl = __shfl_sync(mask, _prev_E, laneId- 1, 32);
           short valheShfl = __shfl_sync(mask, _prev_H, laneId - 1, 32);
-          short eVal=0, heVal = 0;
+          short valtempHShfl = __shfl_sync(mask, _prev_H_temp, laneId - 1, 32);
+          short eVal=0, heVal = 0, H_temp_top = 0;
 
           if(diag >= maxSize) // when the previous thread has phased out, get value from shmem
           {
             eVal = local_spill_prev_E[thread_Id - 1] + extendGap;
             heVal = local_spill_prev_H[thread_Id - 1]+ startGap;
+            H_temp_top = local_spill_prev_H_temp[thread_Id - 1];
           }
           else
           {
             eVal =((warpId !=0 && laneId == 0)?sh_prev_E[warpId-1]: valeShfl) + extendGap;
             heVal =((warpId !=0 && laneId == 0)?sh_prev_H[warpId-1]:valheShfl) + startGap;
+            H_temp_top = ((warpId !=0 && laneId == 0)?sh_prev_H_temp[warpId-1]:valtempHShfl);
           }
+          //if (thread_Id == 3) printf("H from shuffle %x, shifted H = %x, raw H = %x\n", H_temp_top, H_temp_top << 4, H_temp_top);
 
            if(warpId == 0 && laneId == 0) // make sure that values for lane 0 in warp 0 is not undefined
            {
               eVal = 0;
               heVal = 0;
+              H_temp_top = 0;
            }
       		_curr_F = (fVal > hfVal) ? fVal : hfVal;
           
@@ -802,7 +807,9 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
                 H_temp = H_temp & (~4);  //clear bit
                  //printf("*");
           }
-          H_ptr[diagOffset[diagId] + locOffset] =  H_temp;
+          H_val = H_temp_top << 4 | H_temp;
+          //if (thread_Id == 6) printf("H_temp_top = %x, shifted = %x, H_temp = %x, combined = %x\n", H_temp_top, H_temp_top <<4, H_temp, H_val);
+          H_ptr[diagOffset[diagId] + locOffset] =  H_val;
       
           thread_max_i = (thread_max >= _curr_H) ? thread_max_i : i;
           thread_max_j = (thread_max >= _curr_H) ? thread_max_j : thread_Id;
