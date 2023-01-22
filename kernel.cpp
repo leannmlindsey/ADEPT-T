@@ -342,16 +342,16 @@ gpu_bsw::traceBack(short current_i, short current_j, char* seqA_array, char* seq
     unsigned lengthLongerSeq = lengthSeqA < lengthSeqB ? lengthSeqB : lengthSeqA;    
     bool seqBShorter = lengthSeqA < lengthSeqB ? false : true;  //need to keep track of whether query or ref is shorter for I or D in CIGAR 
 
-    current_diagId    = current_i + current_j;
+    current_diagId    = current_i + current_j/2;
     current_locOffset = 0;
-    if(current_diagId < maxSize + 1)
+    if(current_diagId < maxSize)
     {
-        current_locOffset = current_j;
+        current_locOffset = current_j/2;
     }
     else
     {
-        unsigned short myOff = current_diagId - maxSize;
-        current_locOffset    = current_j - myOff;
+        unsigned short myOff = current_diagId - maxSize+1;
+        current_locOffset    = current_j/2 - myOff;
     }
 
     char temp_H;
@@ -452,15 +452,15 @@ gpu_bsw::traceBack(short current_i, short current_j, char* seqA_array, char* seq
           current_i = next_i;
           current_j = next_j;
 
-          current_diagId    = current_i + current_j;
+          current_diagId    = current_i + current_j/2;
           current_locOffset = 0;
 
-          if(current_diagId < maxSize + 1)
+          if(current_diagId < maxSize )
           {
-            current_locOffset = current_j;
+            current_locOffset = current_j/2;
           } else {
-            unsigned short myOff2 = current_diagId - maxSize;
-            current_locOffset     = current_j - myOff2;
+            unsigned short myOff2 = current_diagId - maxSize+1;
+            current_locOffset     = current_j/2 - myOff2;
           }
         //counter++;   
         }
@@ -527,7 +527,6 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
 
     char* H_ptr;
     char* CIGAR, *longCIGAR;
-    //short* I;
      
     extern __shared__ char is_valid_array[];
     char*                  is_valid = &is_valid_array[0];
@@ -599,42 +598,63 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
 
     //set up the prefixSum for diagonal offset look up table for H_ptr
     int    locSum = 0;
-     
-    for(int diag = 0; diag < lengthSeqA + lengthSeqB-1; diag++) 
-    {
-        
-        int locDiagId = diag;
-        if(thread_Id == 0)
-        {
-            
-            if(locDiagId <= minSize + 1)
-            {
-                locSum += locDiagId;
-                diagOffset[locDiagId] = locSum;
-            }
-            else if(locDiagId > maxSize + 1)
-            {
-                locSum += (minSize + 1) - (locDiagId - (maxSize + 1));
-                diagOffset[locDiagId] = locSum;
-            }
-            else
-            {
-                locSum += minSize + 1;
-                diagOffset[locDiagId] = locSum;
-            }
-            diagOffset[lengthSeqA + lengthSeqB] = locSum + 2; 
-          
+    int matrixWidth = 0;
+
+    //create prefixSum table by cycling through the threads in batches
+
+    if (thread_Id == 0 ) printf("minSize = %d, maxSize = %d\n", minSize, maxSize);
+    if (thread_Id <= minSize){
+      if (minSize%2 == 0){
+        matrixWidth = minSize/2;
+       
+      } else {
+        matrixWidth = minSize/2+1;
+      }
+      if (thread_Id == 0) printf("matrixWidth = %d\n",matrixWidth);
+      
+    for (int cyc = 0; cyc <= (matrixWidth + maxSize+1)/(matrixWidth)+1; cyc++){
+      
+      int locDiagId = thread_Id+cyc*matrixWidth;
+      if(thread_Id == 2) printf("cyc = %d, locDiagId = %d\n", cyc, locDiagId);
+      if (locDiagId < maxSize + matrixWidth-1){
+        if(locDiagId <= matrixWidth){
+          locSum = (locDiagId) * (locDiagId + 1)/2;
+          diagOffset[locDiagId]= locSum;
+          printf("LEFT CORNER inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d\n", thread_Id, cyc, locSum, locDiagId);
         }
+        else if (locDiagId > maxSize){
+          int n = (maxSize+matrixWidth) - locDiagId-1;
+          int finalcell = (maxSize) * (matrixWidth);
+          locSum = finalcell - n*(n+1)/2;
+          diagOffset[locDiagId] = locSum;
+          printf("RIGHT CORNER inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d, n=%d, finalcell=%d\n", thread_Id, cyc, locSum, locDiagId,n,finalcell);
+        }
+        else {
+          locSum = ((matrixWidth)*(matrixWidth+1)/2) +(matrixWidth)*(locDiagId-matrixWidth);
+          diagOffset[locDiagId] = locSum;
+          printf("MIDDLE SECTION inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d\n", thread_Id, cyc, locSum, locDiagId);
+        }
+      }
+    }
     }
     
     __syncthreads(); //to make sure prefixSum is calculated before the threads start calculations.    
 
+  if (block_Id == 0 && thread_Id == 0){
+       printf("lenA = %d, lenB = %d\n", lengthSeqA, lengthSeqB);
+    for (int q = 0; q < matrixWidth + maxSize-1; q++){
+     
+      printf("index: %d, %d\n ", q, diagOffset[q]);
+    }
+    printf("FINISHED\n");
+  }
 
   //initializing registers for storing diagonal values for three recent most diagonals (separate tables for H, E, F
     short _curr_H = 0, _curr_F = -100, _curr_E = -100; //-100 acts as neg infinity
     short _prev_H = 0, _prev_F = -100, _prev_E = -100;
     short _prev_prev_H = 0, _prev_prev_F = -100, _prev_prev_E = -100;
     short _temp_Val = 0;
+    //char prev_H_temp = 0;
 
    __shared__ short sh_prev_E[32]; // one such element is required per warp
    __shared__ short sh_prev_H[32];
@@ -644,6 +664,9 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
    __shared__ short local_spill_prev_H[1024];
    __shared__ short local_spill_prev_prev_H[1024];
 
+   //add the shared mem and spill locations for the 4bit values of HEF
+   //__shared__ char sh_prev_H_temp[32];
+   //__shared__ char local_spill_prev_H_temp[1024];
 
     __syncthreads(); // to make sure all shmem allocations have been initialized
 
@@ -652,16 +675,16 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
     {  // iterate for the number of anti-diagonals
 
         
-        unsigned short diagId    = i + j;
+        unsigned short diagId    = i + j/2;
         unsigned short locOffset = 0;
-        if(diagId < maxSize + 1) 
+        if(diagId < maxSize) 
         {
-            locOffset = j;
+            locOffset = j/2;
         }
         else
         {
-          unsigned short myOff = diagId - maxSize;
-          locOffset            = j - myOff;
+          unsigned short myOff = diagId - maxSize+1;
+          locOffset            = j/2 - myOff;
         }
 
 
@@ -685,12 +708,15 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
         _prev_prev_F = _temp_Val;
         _curr_F = -100;
 
+        //prev_H_temp = H_temp;
+
 
         if(laneId == 31)
         { // if you are the last thread in your warp then spill your values to shmem
           sh_prev_E[warpId] = _prev_E;
           sh_prev_H[warpId] = _prev_H;
 		      sh_prev_prev_H[warpId] = _prev_prev_H;
+          //sh_4bitHEF[warpId] = prev_H_temp;
         }
 
         if(diag >= maxSize)
@@ -698,6 +724,7 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
           local_spill_prev_E[thread_Id] = _prev_E;
           local_spill_prev_H[thread_Id] = _prev_H;
           local_spill_prev_prev_H[thread_Id] = _prev_prev_H;
+          //local_spill_4bitHEF[thread_Id] = prev_H_temp;
         }
 
         __syncthreads(); // this is needed so that all the shmem writes are completed.
@@ -807,10 +834,10 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
           top_scores[block_Id] = thread_max;
         }
         
-        gpu_bsw::traceBack(current_i, current_j, seqA_array, seqB_array, prefix_lengthA, 
-                    prefix_lengthB, seqA_align_begin, seqA_align_end,
-                    seqB_align_begin, seqB_align_end, maxMatrixSize, maxCIGAR,
-                    longCIGAR, CIGAR, H_ptr, diagOffset);
+        // gpu_bsw::traceBack(current_i, current_j, seqA_array, seqB_array, prefix_lengthA, 
+        //             prefix_lengthB, seqA_align_begin, seqA_align_end,
+        //             seqB_align_begin, seqB_align_end, maxMatrixSize, maxCIGAR,
+        //             longCIGAR, CIGAR, H_ptr, diagOffset);
 
     }
     __syncthreads();
@@ -907,31 +934,30 @@ gpu_bsw::sequence_aa_kernel_traceback(char* seqA_array, char* seqB_array, unsign
   //set up the prefixSum for diagonal offset look up table for H_ptr, E_ptr, F_ptr
     int    locSum = 0;
      
-    for(int diag = 0; diag < lengthSeqA + lengthSeqB - 1; diag++) 
-    {
-        
-        int locDiagId = diag;
-        if(thread_Id == 0)
-        {
-            
-            if(locDiagId <= minSize + 1)
-            {
-                locSum += locDiagId;
-                diagOffset[locDiagId] = locSum;
-            }
-            else if(locDiagId > maxSize + 1)
-            {
-                locSum += (minSize + 1) - (locDiagId - (maxSize + 1));
-                diagOffset[locDiagId] = locSum;
-            }
-            else
-            {
-                locSum += minSize + 1;
-                diagOffset[locDiagId] = locSum;
-            }
-            diagOffset[lengthSeqA + lengthSeqB] = locSum + 2; //what is this for?
-            
+    //create prefixSum table by cycling through the threads in batches
+
+    for (int cyc = 0; cyc <= (lengthSeqA + lengthSeqB+1)/minSize + 1; cyc++){
+      
+      int locDiagId = thread_Id+cyc*minSize;
+      if (locDiagId < lengthSeqA + lengthSeqB ){
+        if(locDiagId <= minSize){
+          locSum = (locDiagId) * (locDiagId + 1)/2;
+          diagOffset[locDiagId]= locSum;
+          //printf("LEFT CORNER inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d\n", thread_Id, cyc, locSum, locDiagId);
         }
+        else if (locDiagId > maxSize + 1){
+          int n = (maxSize+minSize) - locDiagId-1;
+          int finalcell = (maxSize) * (minSize)+1;
+          locSum = finalcell - n*(n+1)/2;
+          diagOffset[locDiagId] = locSum;
+          //printf("RIGHT CORNER inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d\n", thread_Id, cyc, locSum, locDiagId);
+        }
+        else {
+          locSum = ((minSize)*(minSize+1)/2) +(minSize)*(locDiagId-minSize);
+          diagOffset[locDiagId] = locSum;
+          //printf("MIDDLE SECTION inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d\n", thread_Id, cyc, locSum, locDiagId);
+        }
+      }
     }
     
     __syncthreads(); //to make sure prefixSum is calculated before the threads start calculations.  
@@ -968,16 +994,16 @@ gpu_bsw::sequence_aa_kernel_traceback(char* seqA_array, char* seqB_array, unsign
   for(int diag = 0; diag < lengthSeqA + lengthSeqB - 1; diag++)
   {  // iterate for the number of anti-diagonals
 
-      unsigned short diagId    = i + j;
+      unsigned short diagId    = i + j/2;
       unsigned short locOffset = 0;
-      if(diagId < maxSize + 1) 
+      if(diagId < maxSize) 
       {
-          locOffset = j;
+          locOffset = j/2;
       }
       else
       {
-        unsigned short myOff = diagId - maxSize;
-        locOffset            = j - myOff;
+        unsigned short myOff = diagId - maxSize+1;
+        locOffset            = j/2 - myOff;
       }
 
       is_valid = is_valid - (diag < minSize || diag >= maxSize); //move the pointer to left by 1 if cnd true

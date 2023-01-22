@@ -244,6 +244,7 @@ main(int argc, char* argv[])
 {
   string in_arg = argv[1];
 
+ cout << "On branch Register Shuffle\n" << endl;
  if(in_arg == "aa"){
  	proteinSampleRun(argv[2], argv[3], argv[4]);
  }else{
