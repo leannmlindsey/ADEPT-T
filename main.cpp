@@ -11,7 +11,7 @@
 using namespace std;
 
 void proteinSampleRun(string refFile, string queFile, string out_file){
-  long long int total_cells = 0;
+  //long long int total_cells = 0;
   vector<string> G_sequencesA, G_sequencesB;
   string myInLine;
   int largestA = 0, largestB = 0, totSizeA = 0, totSizeB = 0;
@@ -243,7 +243,7 @@ void dnaSampleRun(string refFile, string queFile, string out_file){
   results_file.close();
 
   free_alignments(&results_test);
-  long long int total_cells = 0;
+  //long long int total_cells = 0;
   //for(int l = 0; l < G_sequencesA.size(); l++){
     //total_cells += G_sequencesA.at(l).size()*G_sequencesB.at(l).size();
   //}
