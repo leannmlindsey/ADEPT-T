@@ -751,21 +751,7 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
             //if (thread_Id == 0 && diag == 0) printf("E - _left_prev_E = %d, extendGap = %d, eVal = %d _left_prev_H = %d, startGap = %d, heVal = %d _curr_F = %d\n",_left_prev_E, extendGap, eVal, _left_prev_H, startGap, heVal, _curr_E);
 
             //calculate the values for curr_H
-            //printf("BEFORE ASSIGNMENT: thread_Id = %d, _left_prev_prev_H = %d, score = %d, diag_score  = %d, addition = %d\n",
-                                      // thread_Id, _left_prev_prev_H, ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore), diag_score, _left_prev_prev_H + ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore));
-            //printf("BEFORE ASSIGNMENT: thread_Id = %d, _left_prev_prev_H = %d, score = %d, diag_score  = %d, addition = %d\n",
-                                       //thread_Id, _left_prev_prev_H, ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore), 7, _left_prev_prev_H + ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore));
-            
             diag_score = ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore) + _left_prev_prev_H;
-
-
-
-            //if(diag_score != ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore) + _left_prev_prev_H)printf("MISMATCH! thread_Id = %d, i = %d, k=%d",thread_Id, i, k);
-
-
-
-            //printf("AFTER ASSIGNMENT: thread_Id = %d, _left_prev_prev_H = %d, score = %d, diag_score  = %d, addition = %d\n",
-                                      //thread_Id, _left_prev_prev_H, ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore), diag_score, _left_prev_prev_H + ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore));
             _curr_H = findMaxFour(diag_score, _curr_F[k], _curr_E, 0, &ind);
             if(thread_Id == 0 && diag == 0) printf("H - myColumnChar = %c, refChar = %c, diag_score = %d, _curr_E = %d, _curr_F = %d, -->MAX--> _curr_H = %d\n\n", 
                                                         myColumnChar[k], longer_seq[i], diag_score, _curr_E, _curr_F[k], _curr_H);
