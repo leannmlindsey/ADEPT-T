@@ -700,7 +700,8 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
         __syncthreads(); // this is needed so that all the shmem writes are completed.
 
         unsigned mask  = __ballot_sync(__activemask(), (is_valid[thread_Id] &&( thread_Id < minSize)));
-        short fVal=0, hfVal=0, eVal=0, heVal=0, _left_prev_E=-100, _left_prev_H=0, _left_prev_prev_H=0, diag_score=0;
+        short fVal=0, hfVal=0, eVal=0, heVal=0, _left_prev_E=-100, _left_prev_H=0, _left_prev_prev_H=0;
+        int diag_score = 0; //if this is not an int, the addition fails (with short declaration), even with 3+0
 
         if(is_valid[thread_Id] && thread_Id < minSize)
         {
@@ -718,7 +719,7 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
               _left_prev_H =((warpId !=0 && laneId == 0)?sh_prev_H[warpId-1]:__shfl_sync(mask, _prev_H[STRIDE-1], laneId - 1, 32));
               _left_prev_prev_H =(warpId !=0 && laneId == 0)?sh_prev_prev_H[warpId-1]:__shfl_sync(mask, _prev_prev_H, laneId - 1, 32);
             }
-
+          
           //Iterate over the STRIDE
           for(short k=0; k<STRIDE; k++ )  {
             //calculate the values for curr_F
@@ -750,10 +751,24 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
             //if (thread_Id == 0 && diag == 0) printf("E - _left_prev_E = %d, extendGap = %d, eVal = %d _left_prev_H = %d, startGap = %d, heVal = %d _curr_F = %d\n",_left_prev_E, extendGap, eVal, _left_prev_H, startGap, heVal, _curr_E);
 
             //calculate the values for curr_H
-            diag_score = _left_prev_prev_H + ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore);
-            if(thread_Id == 0 && diag == 0) printf("diag_score = %d, _left_prev_prev_H = %d, matchScore = %d, misMatchScore = %d, score = %d, full addition = %d\n", diag_score, _left_prev_prev_H, matchScore, misMatchScore,((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore),_left_prev_prev_H + ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore));
+            //printf("BEFORE ASSIGNMENT: thread_Id = %d, _left_prev_prev_H = %d, score = %d, diag_score  = %d, addition = %d\n",
+                                      // thread_Id, _left_prev_prev_H, ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore), diag_score, _left_prev_prev_H + ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore));
+            //printf("BEFORE ASSIGNMENT: thread_Id = %d, _left_prev_prev_H = %d, score = %d, diag_score  = %d, addition = %d\n",
+                                       //thread_Id, _left_prev_prev_H, ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore), 7, _left_prev_prev_H + ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore));
+            
+            diag_score = ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore) + _left_prev_prev_H;
+
+
+
+            //if(diag_score != ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore) + _left_prev_prev_H)printf("MISMATCH! thread_Id = %d, i = %d, k=%d",thread_Id, i, k);
+
+
+
+            //printf("AFTER ASSIGNMENT: thread_Id = %d, _left_prev_prev_H = %d, score = %d, diag_score  = %d, addition = %d\n",
+                                      //thread_Id, _left_prev_prev_H, ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore), diag_score, _left_prev_prev_H + ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore));
             _curr_H = findMaxFour(diag_score, _curr_F[k], _curr_E, 0, &ind);
-            if(thread_Id == 0 && diag == 0) printf("H - myColumnChar = %c, refChar = %c, _left_prev_prev_H = %d, diag_score = %d, _curr_H = %d, _curr_E = %d, _curr_F = %d\nSCORE = %d\n\n", myColumnChar[k], longer_seq[i], _left_prev_prev_H, diag_score, _curr_H, _curr_E, _curr_F[k], _curr_H);
+            if(thread_Id == 0 && diag == 0) printf("H - myColumnChar = %c, refChar = %c, diag_score = %d, _curr_E = %d, _curr_F = %d, -->MAX--> _curr_H = %d\n\n", 
+                                                        myColumnChar[k], longer_seq[i], diag_score, _curr_E, _curr_F[k], _curr_H);
             if (ind == 0) { // diagonal cell is max, set bits to 0b00001100
                   H_temp = H_temp | 4;     // set bit 0b00000100
                   H_temp = H_temp | 8;     // set bit 0b00001000
