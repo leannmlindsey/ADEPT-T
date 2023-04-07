@@ -588,14 +588,10 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
       if(thread_Id < (lengthSeqA/STRIDE)) {
         for(int k=0; k<STRIDE; k++) {
           myColumnChar[k] = seqA[thread_Id*STRIDE+k];
-          printf("k = %d, index = %d, char = %c\n", k, thread_Id*STRIDE+k, seqA[thread_Id*STRIDE+k]);
         }
-        printf("mod %d, thread_Id %d, last segment %d\n", lengthSeqA%STRIDE, thread_Id, lengthSeqA/STRIDE );
         if(lengthSeqA%STRIDE != 0 && thread_Id == (lengthSeqA/STRIDE)) {//in the last thread
-            printf("fixing the last segment\n");
             for(int k=0; k<lengthSeqA%STRIDE;k++){
               myColumnChar[k] = seqA[thread_Id*STRIDE+k];
-              printf("thread_Id = %d, k = %d, index = %d, char = %c\n", thread_Id, k, thread_Id*STRIDE+k, seqA[thread_Id*STRIDE+k]); 
             }
         }
         longer_seq = seqB;
@@ -603,20 +599,15 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
     }
     else
     {
-        printf("lengthSeqB = %d, STRIDE = %d, mod = %d\n", lengthSeqB, STRIDE, lengthSeqB%STRIDE);
         if(thread_Id < (lengthSeqB/STRIDE)) {
           for(int k=0; k<STRIDE; k++) {
-            myColumnChar[k] = seqB[thread_Id*STRIDE+k];
-            printf("thread_Id = %d, k = %d, index = %d, char = %c\n", thread_Id, k, thread_Id*STRIDE+k, seqB[thread_Id*STRIDE+k]); 
+            myColumnChar[k] = seqB[thread_Id*STRIDE+k]; 
           } 
         }
           //zero out chars not in this sequence
-        printf("mod %d, thread_Id %d, last segment %d\n", lengthSeqB%STRIDE, thread_Id, lengthSeqB/STRIDE );
         if(lengthSeqB%STRIDE != 0 && thread_Id == (lengthSeqB/STRIDE)) {//in the last thread
-            printf("fixing the last segment\n");
             for(int k=0; k<lengthSeqB%STRIDE;k++){
               myColumnChar[k] = seqB[thread_Id*STRIDE+k];
-              printf("thread_Id = %d, k = %d, index = %d, char = %c\n", thread_Id, k, thread_Id*STRIDE+k, seqB[thread_Id*STRIDE+k]); 
             }
         }
           longer_seq = seqA;
