@@ -3,7 +3,7 @@
 __inline__ __device__ short
 gpu_bsw::warpReduceMax_with_index_reverse(short val, short& myIndex, short& myIndex2, unsigned lengthSeqB)
 {
-    int   warpSize = 32;
+    short   warpSize = 32;
     short myMax    = 0;
     short newInd   = 0;
     short newInd2  = 0;
@@ -574,24 +574,54 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
     // the shorter of the two strings is stored in thread registers
     char H_temp = 0;  //temp value of H for entire STRIDE is stored in register until H, E and F are set then written to global; set all bits to 0 initially
 
-    if(lengthSeqA < lengthSeqB)
-    {
-      if(thread_Id < (lengthSeqA/STRIDE)+1)
-        for(int k=0; k<STRIDE; k++)
-          myColumnChar[k] = seqA[thread_Id*STRIDE+k];  // read only once
-      longer_seq = seqB;
+    //for(int q = 0; q<lengthSeqA; q++){
+    // if(thread_Id == 0) printf("%c",seqA[q]);
+      
+    //}
+    //if(thread_Id == 0)printf("\n");
+    //for(int q = 0; q<lengthSeqB; q++){
+    //  if(thread_Id == 0) printf("%c",seqB[q]);
+      
+    //}
+    //if(thread_Id == 0)printf("\n");
+    if(lengthSeqA < lengthSeqB) {
+      if(thread_Id < (lengthSeqA/STRIDE)) {
+        for(int k=0; k<STRIDE; k++) {
+          myColumnChar[k] = seqA[thread_Id*STRIDE+k];
+          printf("k = %d, index = %d, char = %c\n", k, thread_Id*STRIDE+k, seqA[thread_Id*STRIDE+k]);
+        }
+        printf("mod %d, thread_Id %d, last segment %d\n", lengthSeqA%STRIDE, thread_Id, lengthSeqA/STRIDE );
+        if(lengthSeqA%STRIDE != 0 && thread_Id == (lengthSeqA/STRIDE)) {//in the last thread
+            printf("fixing the last segment\n");
+            for(int k=0; k<lengthSeqA%STRIDE;k++){
+              myColumnChar[k] = seqA[thread_Id*STRIDE+k];
+              printf("thread_Id = %d, k = %d, index = %d, char = %c\n", thread_Id, k, thread_Id*STRIDE+k, seqA[thread_Id*STRIDE+k]); 
+            }
+        }
+        longer_seq = seqB;
+      }
     }
     else
     {
-      if(thread_Id < (lengthSeqB/STRIDE)+1)
-       for(int k=0; k<STRIDE; k++)
-          myColumnChar[k] = seqB[thread_Id*STRIDE+k];  // read only once
-      longer_seq = seqA;
+        printf("lengthSeqB = %d, STRIDE = %d, mod = %d\n", lengthSeqB, STRIDE, lengthSeqB%STRIDE);
+        if(thread_Id < (lengthSeqB/STRIDE)) {
+          for(int k=0; k<STRIDE; k++) {
+            myColumnChar[k] = seqB[thread_Id*STRIDE+k];
+            printf("thread_Id = %d, k = %d, index = %d, char = %c\n", thread_Id, k, thread_Id*STRIDE+k, seqB[thread_Id*STRIDE+k]); 
+          } 
+        }
+          //zero out chars not in this sequence
+        printf("mod %d, thread_Id %d, last segment %d\n", lengthSeqB%STRIDE, thread_Id, lengthSeqB/STRIDE );
+        if(lengthSeqB%STRIDE != 0 && thread_Id == (lengthSeqB/STRIDE)) {//in the last thread
+            printf("fixing the last segment\n");
+            for(int k=0; k<lengthSeqB%STRIDE;k++){
+              myColumnChar[k] = seqB[thread_Id*STRIDE+k];
+              printf("thread_Id = %d, k = %d, index = %d, char = %c\n", thread_Id, k, thread_Id*STRIDE+k, seqB[thread_Id*STRIDE+k]); 
+            }
+        }
+          longer_seq = seqA;
+        
     }
-
-    //if(block_Id==0) printf("thread_Id:%d, myColumnChar:%c, %c, %c, %c\n",thread_Id, myColumnChar[0], myColumnChar[1], myColumnChar[2], myColumnChar[3]);
-
-
     __syncthreads(); // this is required here so that complete sequence has been copied to shared memory
 
     int   i            = 0;
@@ -632,8 +662,8 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
      __syncthreads(); //to make sure prefixSum is calculated before the threads start calculations.    
 
   //initializing registers for storing diagonal values for three recent most diagonals (separate tables for H, E, F
-    short _curr_H = 0, _curr_F[STRIDE] = {-100, -100, -100, -100}, _curr_E = -100; //-100 acts as neg infinity
-    short _prev_H[STRIDE] = {0,0,0,0}, _prev_F[STRIDE] = {-100, -100, -100, -100}, _prev_E = -100;
+    short _curr_H[STRIDE], _curr_F[STRIDE], _curr_E = -100; //-100 acts as neg infinity
+    short _prev_H[STRIDE], _prev_F[STRIDE], _prev_E = -100;
     short _prev_prev_H = 0;
     
    //if(thread_Id == 0)printf("_curr_H:%d, _curr_F:%d, _curr_E:%d",_curr_H, _curr_F[1], _curr_E);
@@ -647,15 +677,22 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
    __shared__ short local_spill_prev_H[1024];
    __shared__ short local_spill_prev_prev_H[1024];
 
+  //initialize arrays 
   if(thread_Id == 0){
-      _prev_prev_H = -100;
-      sh_prev_E[0] = -100;
-      sh_prev_H[0] = 0;
-      sh_prev_prev_H[0] = 0;
+      for (int k = 0; k < STRIDE;k++){
+        _curr_F[k] = -100;
+        _curr_H[k] = 0;
 
-      local_spill_prev_E[0] = -100;
-      local_spill_prev_H[0] = 0;
-      local_spill_prev_prev_H[0] = 0;
+        _prev_F[k] = -100;
+        _prev_H[k] = 0;
+      }
+        sh_prev_E[0] = -100;
+        sh_prev_H[0] = 0;
+        sh_prev_prev_H[0] = 0;
+
+        local_spill_prev_E[0] = -100;
+        local_spill_prev_H[0] = 0;
+        local_spill_prev_prev_H[0] = 0;
     }
    
 
@@ -665,7 +702,7 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
     
     for(int diag = 0; diag < minSize/STRIDE + maxSize; diag++)
     {  // iterate for the number of anti-diagonals
-        if(thread_Id==0)printf("\ndiag:%d\n",diag); 
+        if(thread_Id==0)printf("\n"); 
         unsigned short diagId    = i + j;
         unsigned short locOffset = 0;
         if(diagId < maxSize) 
@@ -682,50 +719,46 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
 
         is_valid = is_valid - (diag < (minSize/STRIDE)+1 || diag >= maxSize); //move the pointer to left by 1 if cnd true       
       
-        if(laneId == 31)
-        { // if you are the last thread in your warp then spill your values to shmem
-          sh_prev_E[warpId] = _prev_E;
-          sh_prev_H[warpId] = _prev_H[STRIDE-1];
-		      sh_prev_prev_H[warpId] = _prev_prev_H;
-        }
-
-        if(diag >= maxSize)
-        { // if you are invalid in this iteration, spill your values to shmem
-          local_spill_prev_E[thread_Id] = _prev_E;
-          local_spill_prev_H[thread_Id] = _prev_H[STRIDE-1];
-          local_spill_prev_prev_H[thread_Id] = _prev_prev_H;
-        }
-       
-
         __syncthreads(); // this is needed so that all the shmem writes are completed.
 
         unsigned mask  = __ballot_sync(__activemask(), (is_valid[thread_Id] &&( thread_Id < minSize)));
-        short fVal=0, hfVal=0, eVal=0, heVal=0, _left_prev_E=-100, _left_prev_H=0, _left_prev_prev_H=0;
-        int diag_score = 0; //if this is not an int, the addition fails (with short declaration), even with 3+0
+        int fVal=0, hfVal=0, eVal=0, heVal=0, final_prev_prev_H = 0;
+        int diag_score = 0; //if this is not an int, the addition fails (with short declaration), even with 3+0, I don't know why
 
         if(is_valid[thread_Id] && thread_Id < minSize)
         {
-          //get the prev_E, prev_H, and prev_prev_H values from the previous thread needed to calculate curr_E and curr_H
-        
-          if(diag >= maxSize) // when the previous thread has phased out, get value from shmem
-            {
-              _left_prev_E = local_spill_prev_E[thread_Id - 1];
-              _left_prev_H = local_spill_prev_H[thread_Id - 1];
-              _left_prev_prev_H = local_spill_prev_prev_H[thread_Id - 1];
-            }
-          else
-            {
-              _left_prev_E =((warpId !=0 && laneId == 0)?sh_prev_E[warpId-1]: __shfl_sync(mask, _prev_E, laneId- 1, 32));
-              _left_prev_H =((warpId !=0 && laneId == 0)?sh_prev_H[warpId-1]:__shfl_sync(mask, _prev_H[STRIDE-1], laneId - 1, 32));
-              _left_prev_prev_H =(warpId !=0 && laneId == 0)?sh_prev_prev_H[warpId-1]:__shfl_sync(mask, _prev_prev_H, laneId - 1, 32);
-            }
-          
+          int valeShfl = __shfl_sync(mask, _prev_E, laneId- 1, 32);
+          int valheShfl = __shfl_sync(mask, _prev_H[STRIDE-1], laneId - 1, 32);
+          int valhShfl = __shfl_sync(mask, _prev_prev_H, laneId - 1, 32);
           //Iterate over the STRIDE
-          for(short k=0; k<STRIDE; k++ )  {
+          for(int k=0; k<STRIDE; k++ )  {
+            fVal = _prev_F[k] + extendGap;
+            hfVal = _prev_H[k] + startGap;
+            
+            //get the prev_E, prev_H, and prev_prev_H values from the previous thread needed to calculate curr_E and curr_H
+            if(diag >= maxSize) // when the previous thread has phased out, get value from shmem
+            {
+              eVal = local_spill_prev_E[thread_Id - 1] + extendGap;
+              heVal = local_spill_prev_H[thread_Id - 1]+ startGap;
+              final_prev_prev_H = local_spill_prev_prev_H[thread_Id - 1];
+            }
+            else
+            { 
+              if(k==0){
+                eVal =((warpId !=0 && laneId == 0)?sh_prev_E[warpId-1]:valeShfl) + extendGap;
+                heVal =((warpId !=0 && laneId == 0)?sh_prev_H[warpId-1]:valheShfl) + startGap;
+                final_prev_prev_H =(warpId !=0 && laneId == 0)?sh_prev_prev_H[warpId-1]:valhShfl;
+              } else {
+                eVal =((warpId !=0 && laneId == 0)?sh_prev_E[warpId-1]: _prev_E) + extendGap;
+                heVal =((warpId !=0 && laneId == 0)?sh_prev_H[warpId-1]:_curr_H[k-1]) + startGap;
+                final_prev_prev_H =(warpId !=0 && laneId == 0)?sh_prev_prev_H[warpId-1]:_prev_H[k-1];
+              }
+            }
+
             //calculate the values for curr_F
             fVal = _prev_F[k] + extendGap;
             hfVal = _prev_H[k] + startGap;
-           
+            //if(thread_Id == 0)printf("fVal = %d\n",fVal);
             if (fVal > hfVal){ //record F value in H_temp 0b00000001
                   H_temp = H_temp | 1;
                   _curr_F[k] = fVal;
@@ -733,13 +766,7 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
                   H_temp = H_temp & (~1);
                   _curr_F[k] = hfVal;
             }
-            //if (thread_Id == 0 && diag == 0) printf("F - _prev_F = %d, extendGap = %d, fVal = %d _prev_H = %d, startGap = %d, hfVal = %d _curr_F = %d\n", _prev_F[k], extendGap, fVal, _prev_H[k], startGap, hfVal, _curr_F[k]);
 
-            //calculate the values for curr_E
-            eVal = _left_prev_E + extendGap;
-            heVal = _left_prev_H + startGap;
-
-        
             if (eVal > heVal) { //record E value in H_temp 0b00000010
                 H_temp = H_temp | 2;
                 _curr_E = eVal;
@@ -747,14 +774,14 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
                 H_temp = H_temp & (~2);
                 _curr_E = heVal;
             }
-          
-            //if (thread_Id == 0 && diag == 0) printf("E - _left_prev_E = %d, extendGap = %d, eVal = %d _left_prev_H = %d, startGap = %d, heVal = %d _curr_F = %d\n",_left_prev_E, extendGap, eVal, _left_prev_H, startGap, heVal, _curr_E);
-
+            if(thread_Id == 0 && k == 0) eVal = -101;
             //calculate the values for curr_H
-            diag_score = ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore) + _left_prev_prev_H;
-            _curr_H = findMaxFour(diag_score, _curr_F[k], _curr_E, 0, &ind);
-            if(thread_Id == 0 && diag == 0) printf("H - myColumnChar = %c, refChar = %c, diag_score = %d, _curr_E = %d, _curr_F = %d, -->MAX--> _curr_H = %d\n\n", 
-                                                        myColumnChar[k], longer_seq[i], diag_score, _curr_E, _curr_F[k], _curr_H);
+            diag_score = ((longer_seq[i] == myColumnChar[k]) ? matchScore : misMatchScore) + final_prev_prev_H;
+            _curr_H[k] = findMaxFour(diag_score, _curr_F[k], _curr_E, 0, &ind);
+            if(thread_Id == 0)printf("%c, %c, eVal = %d, heVal = %d, _curr_E = %d, fVal = %d, hfVal = %d, _curr_F = %d, final_prev_prev_H = %d, diag_score = %d, MAX--> _curr_H = %d\n", 
+                          longer_seq[i],myColumnChar[k],eVal, heVal, _curr_E, fVal, hfVal, _curr_F[k], final_prev_prev_H, diag_score, _curr_H[k]);
+            //if(thread_Id == 2)printf("%d ", _curr_H[k]);
+          
             if (ind == 0) { // diagonal cell is max, set bits to 0b00001100
                   H_temp = H_temp | 4;     // set bit 0b00000100
                   H_temp = H_temp | 8;     // set bit 0b00001000
@@ -775,11 +802,22 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
 
             // value exchanges happens here to set up registers for the next iteration
             
-            _prev_F[k] = _curr_F[k]; 
-            _left_prev_prev_H = _prev_H[k-1];  //FIXME
-            _left_prev_E = _curr_E;
-            _prev_H[k] = _curr_H;
-            
+            //shuffle the reg values to prepare for next iteration 
+            _prev_E = _curr_E;
+
+            if(laneId == 31)
+            { // if you are the last thread in your warp then spill your values to shmem
+              sh_prev_E[warpId] = _prev_E;
+              sh_prev_H[warpId] = _prev_H[STRIDE-1];
+		          sh_prev_prev_H[warpId] = _prev_prev_H;
+            }
+
+            if(diag >= maxSize)
+            { // if you are invalid in this iteration, spill your values to shmem
+              local_spill_prev_E[thread_Id] = _prev_E;
+              local_spill_prev_H[thread_Id] = _prev_H[STRIDE-1];
+              local_spill_prev_prev_H[thread_Id] = _prev_prev_H;
+            }
 
             //write H values to global memory
             //if loop for if thread_Id is even or odd
@@ -794,16 +832,19 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
                H_ptr[diagOffset[diagId] + locOffset + k] =  H_temp;
             }
             
-            thread_max_i = (thread_max >= _curr_H) ? thread_max_i : i;
-            thread_max_j = (thread_max >= _curr_H) ? thread_max_j : thread_Id*STRIDE+k; 
-            thread_max   = (thread_max >= _curr_H) ? thread_max : _curr_H;
+            thread_max_i = (thread_max >= _curr_H[k]) ? thread_max_i : i;
+            thread_max_j = (thread_max >= _curr_H[k]) ? thread_max_j : thread_Id*STRIDE+k; 
+            thread_max   = (thread_max >= _curr_H[k]) ? thread_max : _curr_H[k];
            
             //if(thread_Id==0)printf("thread_max_i: %d, thread_max_j: %d, thread_max: %d\n", thread_max_i, thread_max_j, thread_max);
           }
-            _prev_prev_H = _prev_H[STRIDE-1];
-	          
-            _prev_E = _curr_E;
-            i++;
+          _prev_prev_H = _prev_H[STRIDE-1];
+          _prev_E = _curr_E;
+          for (int k=0; k< STRIDE; k++){
+            _prev_H[k] = _curr_H[k];
+            _prev_F[k] = _curr_F[k];
+          }
+          i++;
        }
        //if(thread_Id == 0)printf("END OF LOOP: thread_Id = %d, i = %d, j = %d, thread_max = %d, thread_max_i = %d, thread_max_j = %d\n", thread_Id, i, j, thread_max, thread_max_i, thread_max_j);
       __syncthreads(); 

@@ -7,7 +7,7 @@
 #define NUM_OF_AA 21
 #define ENCOD_MAT_SIZE 91
 #define SCORE_MAT_SIZE 576
-#define STRIDE 10
+#define STRIDE 6
 
 namespace gpu_bsw{
 __device__ short
