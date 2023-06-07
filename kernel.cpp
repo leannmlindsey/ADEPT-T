@@ -544,20 +544,22 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
     is_valid += minSize;
     memset(is_valid, 0, minSize);
 
-    char myColumnChar;
+    char myRowChar;
     // the shorter of the two strings is stored in thread registers
+    // threads run horizontally
+
     char H_temp = 0;  //temp value of H stored in register until H, E and F are set then written to global; set all bits to 0 initially
 
     if(lengthSeqA < lengthSeqB)
     {
       if(thread_Id < lengthSeqA)
-        myColumnChar = seqA[thread_Id];  // read only once
+        myRowChar = seqA[thread_Id];  // read only once
       longer_seq = seqB;
     }
     else
     {
       if(thread_Id < lengthSeqB)
-        myColumnChar = seqB[thread_Id];
+        myRowChar = seqB[thread_Id];
       longer_seq = seqA;
     }
 
@@ -574,30 +576,48 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
     int    locSum = 0;
     
     //create prefixSum table by cycling through the threads in batches
+    int binary_matrix_height = maxSize/2 +1; //binary matrix is half the height of maxSize
+    int binary_matrix_min, binary_matrix_max;
 
-    for (int cyc = 0; cyc <= (lengthSeqA + lengthSeqB+1)/minSize + 1; cyc++){
-      
-      int locDiagId = thread_Id+cyc*minSize;
-      if (locDiagId < lengthSeqA + lengthSeqB ){
-        if(locDiagId <= minSize){
-          locSum = (locDiagId) * (locDiagId + 1)/2;
-          diagOffset[locDiagId]= locSum;
-          //printf("LEFT CORNER inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d\n", thread_Id, cyc, locSum, locDiagId);
-        }
-        else if (locDiagId > maxSize + 1){
-          int n = (maxSize+minSize) - locDiagId-1;
-          int finalcell = (maxSize) * (minSize)+1;
-          locSum = finalcell - n*(n+1)/2;
-          diagOffset[locDiagId] = locSum;
-          //printf("RIGHT CORNER inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d\n", thread_Id, cyc, locSum, locDiagId);
-        }
-        else {
-          locSum = ((minSize)*(minSize+1)/2) +(minSize)*(locDiagId-minSize);
-          diagOffset[locDiagId] = locSum;
-          //printf("MIDDLE SECTION inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d\n", thread_Id, cyc, locSum, locDiagId);
+    if (binary_matrix_height > minSize) { 
+	    binary_matrix_min = minSize;
+	    binary_matrix_max = binary_matrix_height;
+    } else { //sometimes binary matrix ends up shorter than minSize, this fixes the diagOffset in that case
+	    binary_matrix_min = binary_matrix_height;
+	    binary_matrix_max = minSize;
+    };
+
+    if (thread_Id ==0) {
+	    printf("# cycles = %d, minSize = %d, binary_matrix_min + binary_matrix_max = %d\n", (binary_matrix_min + binary_matrix_max+1)/minSize + 1, minSize, binary_matrix_min + binary_matrix_max);
+    };
+    for (int cyc = 0; cyc <= (binary_matrix_min + binary_matrix_max+1)/minSize + 1; cyc++){
+    	int locDiagId = thread_Id+cyc*minSize;
+        if (locDiagId < binary_matrix_min + binary_matrix_max ){
+          if(locDiagId < binary_matrix_min){
+            locSum = (locDiagId) * (locDiagId + 1)/2; //fill in upper left triangle in matrix
+            diagOffset[locDiagId]= locSum;
+//	    printf("LEFT CORNER runs from 0 to %d\n", binary_matrix_min-1);
+            //printf("LEFT CORNER inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d\n", thread_Id, cyc, locSum, locDiagId);
+          }
+          else if (locDiagId > binary_matrix_max){
+            int n = (binary_matrix_max+binary_matrix_min) - locDiagId-1;
+            int finalcell = (binary_matrix_max) * (binary_matrix_min); 
+            locSum = finalcell - n*(n+1)/2; //fill in lower right triangle of the matrix
+            diagOffset[locDiagId] = locSum;
+//	    printf("RIGHT CORNER runs from binary_matrix_max = %d to finalcell = %d\n",binary_matrix_max,  finalcell);
+            //printf("RIGHT CORNER inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d\n", thread_Id, cyc, locSum, locDiagId);
+          }
+          else {
+            locSum = ((binary_matrix_min)*(binary_matrix_min+1)/2) +(binary_matrix_min)*(locDiagId-binary_matrix_min);
+            diagOffset[locDiagId] = locSum; //fill in constant diagonals of the matrix
+            //printf("MIDDLE SECTION inside loop thread_Id = %d cyc = %d locSum = %d locDiagId = %d\n", thread_Id, cyc, locSum, locDiagId);
+          }
         }
       }
-    }
+         if(thread_Id == 0){
+          printf("TABLE 1 : cycles = %d, binary_matrix_height = %d, minSize = %d, maxSize = %d, finalcell = %d\n",(minSize + binary_matrix_height+1)/minSize + 1, binary_matrix_height, minSize, maxSize, (binary_matrix_height) * (minSize)+1 );
+          for(int b = 0; b< minSize + binary_matrix_height-1; b++) printf("%d ", diagOffset[b]);
+         }
     
      __syncthreads(); //to make sure prefixSum is calculated before the threads start calculations.    
    
@@ -605,194 +625,194 @@ gpu_bsw::sequence_dna_kernel_traceback(char* seqA_array, char* seqB_array, unsig
 
 
   //initializing registers for storing diagonal values for three recent most diagonals (separate tables for H, E, F
-    short _curr_H = 0, _curr_F = -100, _curr_E = -100; //-100 acts as neg infinity
-    short _prev_H = 0, _prev_F = -100, _prev_E = -100;
-    short _prev_prev_H = 0, _prev_prev_F = -100, _prev_prev_E = -100;
-    short _temp_Val = 0;
+  //   short _curr_H = 0, _curr_F = -100, _curr_E = -100; //-100 acts as neg infinity
+  //   short _prev_H = 0, _prev_F = -100, _prev_E = -100;
+  //   short _prev_prev_H = 0, _prev_prev_F = -100, _prev_prev_E = -100;
+  //   short _temp_Val = 0;
 
-   __shared__ short sh_prev_E[32]; // one such element is required per warp
-   __shared__ short sh_prev_H[32];
-   __shared__ short sh_prev_prev_H[32];
+  //  __shared__ short sh_prev_E[32]; // one such element is required per warp
+  //  __shared__ short sh_prev_H[32];
+  //  __shared__ short sh_prev_prev_H[32];
 
-   __shared__ short local_spill_prev_E[1024];// each threads local spill,
-   __shared__ short local_spill_prev_H[1024];
-   __shared__ short local_spill_prev_prev_H[1024];
+  //  __shared__ short local_spill_prev_E[1024];// each threads local spill,
+  //  __shared__ short local_spill_prev_H[1024];
+  //  __shared__ short local_spill_prev_prev_H[1024];
 
 
-    __syncthreads(); // to make sure all shmem allocations have been initialized
+  //   __syncthreads(); // to make sure all shmem allocations have been initialized
 
     
-    for(int diag = 0; diag < lengthSeqA + lengthSeqB-1; diag++)
-    {  // iterate for the number of anti-diagonals
+  //   for(int diag = 0; diag < lengthSeqA + lengthSeqB-1; diag++)
+  //   {  // iterate for the number of anti-diagonals
 
         
-        unsigned short diagId    = i + j;
-        unsigned short locOffset = 0;
-        if(diagId < maxSize) 
-        {
-            locOffset = j;
-        }
-        else
-        {
-          unsigned short myOff = diagId - maxSize+1;
-          locOffset            = j - myOff;
-        }
+  //       unsigned short diagId    = i + j;
+  //       unsigned short locOffset = 0;
+  //       if(diagId < maxSize) 
+  //       {
+  //           locOffset = j;
+  //       }
+  //       else
+  //       {
+  //         unsigned short myOff = diagId - maxSize+1;
+  //         locOffset            = j - myOff;
+  //       }
 
 
-        is_valid = is_valid - (diag < minSize || diag >= maxSize); //move the pointer to left by 1 if cnd true
+  //       is_valid = is_valid - (diag < minSize || diag >= maxSize); //move the pointer to left by 1 if cnd true
 
-	       _temp_Val = _prev_H; // value exchange happens here to setup registers for next iteration
-	       _prev_H = _curr_H;
-	       _curr_H = _prev_prev_H;
-	       _prev_prev_H = _temp_Val;
-         _curr_H = 0;
+	//        _temp_Val = _prev_H; // value exchange happens here to setup registers for next iteration
+	//        _prev_H = _curr_H;
+	//        _curr_H = _prev_prev_H;
+	//        _prev_prev_H = _temp_Val;
+  //        _curr_H = 0;
 
-        _temp_Val = _prev_E;
-        _prev_E = _curr_E;
-        _curr_E = _prev_prev_E;
-        _prev_prev_E = _temp_Val;
-        _curr_E = -100;
+  //       _temp_Val = _prev_E;
+  //       _prev_E = _curr_E;
+  //       _curr_E = _prev_prev_E;
+  //       _prev_prev_E = _temp_Val;
+  //       _curr_E = -100;
 
-        _temp_Val = _prev_F;
-        _prev_F = _curr_F;
-        _curr_F = _prev_prev_F;
-        _prev_prev_F = _temp_Val;
-        _curr_F = -100;
+  //       _temp_Val = _prev_F;
+  //       _prev_F = _curr_F;
+  //       _curr_F = _prev_prev_F;
+  //       _prev_prev_F = _temp_Val;
+  //       _curr_F = -100;
 
 
-        if(laneId == 31)
-        { // if you are the last thread in your warp then spill your values to shmem
-          sh_prev_E[warpId] = _prev_E;
-          sh_prev_H[warpId] = _prev_H;
-		      sh_prev_prev_H[warpId] = _prev_prev_H;
-        }
+  //       if(laneId == 31)
+  //       { // if you are the last thread in your warp then spill your values to shmem
+  //         sh_prev_E[warpId] = _prev_E;
+  //         sh_prev_H[warpId] = _prev_H;
+	// 	      sh_prev_prev_H[warpId] = _prev_prev_H;
+  //       }
 
-        if(diag >= maxSize)
-        { // if you are invalid in this iteration, spill your values to shmem
-          local_spill_prev_E[thread_Id] = _prev_E;
-          local_spill_prev_H[thread_Id] = _prev_H;
-          local_spill_prev_prev_H[thread_Id] = _prev_prev_H;
-        }
+  //       if(diag >= maxSize)
+  //       { // if you are invalid in this iteration, spill your values to shmem
+  //         local_spill_prev_E[thread_Id] = _prev_E;
+  //         local_spill_prev_H[thread_Id] = _prev_H;
+  //         local_spill_prev_prev_H[thread_Id] = _prev_prev_H;
+  //       }
 
-        __syncthreads(); // this is needed so that all the shmem writes are completed.
+  //       __syncthreads(); // this is needed so that all the shmem writes are completed.
 
-        if(is_valid[thread_Id] && thread_Id < minSize)
-        {
-          unsigned mask  = __ballot_sync(__activemask(), (is_valid[thread_Id] &&( thread_Id < minSize)));
-          short fVal = _prev_F + extendGap;
-          short hfVal = _prev_H + startGap;
-          short valeShfl = __shfl_sync(mask, _prev_E, laneId- 1, 32);
-          short valheShfl = __shfl_sync(mask, _prev_H, laneId - 1, 32);
-          short eVal=0, heVal = 0;
+  //       if(is_valid[thread_Id] && thread_Id < minSize)
+  //       {
+  //         unsigned mask  = __ballot_sync(__activemask(), (is_valid[thread_Id] &&( thread_Id < minSize)));
+  //         short fVal = _prev_F + extendGap;
+  //         short hfVal = _prev_H + startGap;
+  //         short valeShfl = __shfl_sync(mask, _prev_E, laneId- 1, 32);
+  //         short valheShfl = __shfl_sync(mask, _prev_H, laneId - 1, 32);
+  //         short eVal=0, heVal = 0;
 
-          if(diag >= maxSize) // when the previous thread has phased out, get value from shmem
-          {
-            eVal = local_spill_prev_E[thread_Id - 1] + extendGap;
-            heVal = local_spill_prev_H[thread_Id - 1]+ startGap;
-          }
-          else
-          {
-            eVal =((warpId !=0 && laneId == 0)?sh_prev_E[warpId-1]: valeShfl) + extendGap;
-            heVal =((warpId !=0 && laneId == 0)?sh_prev_H[warpId-1]:valheShfl) + startGap;
-          }
+  //         if(diag >= maxSize) // when the previous thread has phased out, get value from shmem
+  //         {
+  //           eVal = local_spill_prev_E[thread_Id - 1] + extendGap;
+  //           heVal = local_spill_prev_H[thread_Id - 1]+ startGap;
+  //         }
+  //         else
+  //         {
+  //           eVal =((warpId !=0 && laneId == 0)?sh_prev_E[warpId-1]: valeShfl) + extendGap;
+  //           heVal =((warpId !=0 && laneId == 0)?sh_prev_H[warpId-1]:valheShfl) + startGap;
+  //         }
 
-           if(warpId == 0 && laneId == 0) // make sure that values for lane 0 in warp 0 is not undefined
-           {
-              eVal = 0;
-              heVal = 0;
-           }
-      		_curr_F = (fVal > hfVal) ? fVal : hfVal;
+  //          if(warpId == 0 && laneId == 0) // make sure that values for lane 0 in warp 0 is not undefined
+  //          {
+  //             eVal = 0;
+  //             heVal = 0;
+  //          }
+  //     		_curr_F = (fVal > hfVal) ? fVal : hfVal;
           
-          if (fVal > hfVal){ //record F value in H_temp 0b00000001
-                H_temp = H_temp | 1;
-          } else { //record F value in H_temp 0b00000000
-                H_temp = H_temp & (~1);
-          }
+  //         if (fVal > hfVal){ //record F value in H_temp 0b00000001
+  //               H_temp = H_temp | 1;
+  //         } else { //record F value in H_temp 0b00000000
+  //               H_temp = H_temp & (~1);
+  //         }
 
-      		_curr_E = (eVal > heVal) ? eVal : heVal;
-          if (j!=0){
-            if (eVal > heVal) { //record E value in H_temp 0b00000010
-              H_temp = H_temp | 2;
-            } else { //record E value in H_temp 0b00000000
-              H_temp = H_temp & (~2);
-            }
-          }
-          short testShufll = __shfl_sync(mask, _prev_prev_H, laneId - 1, 32);
-          short final_prev_prev_H = 0;
-          if(diag >= maxSize)
-          {
-            final_prev_prev_H = local_spill_prev_prev_H[thread_Id - 1];
-          }
-          else
-          {
-            final_prev_prev_H =(warpId !=0 && laneId == 0)?sh_prev_prev_H[warpId-1]:testShufll;
-          }
+  //     		_curr_E = (eVal > heVal) ? eVal : heVal;
+  //         if (j!=0){
+  //           if (eVal > heVal) { //record E value in H_temp 0b00000010
+  //             H_temp = H_temp | 2;
+  //           } else { //record E value in H_temp 0b00000000
+  //             H_temp = H_temp & (~2);
+  //           }
+  //         }
+  //         short testShufll = __shfl_sync(mask, _prev_prev_H, laneId - 1, 32);
+  //         short final_prev_prev_H = 0;
+  //         if(diag >= maxSize)
+  //         {
+  //           final_prev_prev_H = local_spill_prev_prev_H[thread_Id - 1];
+  //         }
+  //         else
+  //         {
+  //           final_prev_prev_H =(warpId !=0 && laneId == 0)?sh_prev_prev_H[warpId-1]:testShufll;
+  //         }
 
-          if(warpId == 0 && laneId == 0) final_prev_prev_H = 0;
-          short diag_score = final_prev_prev_H + ((longer_seq[i] == myColumnChar) ? matchScore : misMatchScore);
-          _curr_H = findMaxFour(diag_score, _curr_F, _curr_E, 0, &ind);
+  //         if(warpId == 0 && laneId == 0) final_prev_prev_H = 0;
+  //         short diag_score = final_prev_prev_H + ((longer_seq[i] == myColumnChar) ? matchScore : misMatchScore);
+  //         _curr_H = findMaxFour(diag_score, _curr_F, _curr_E, 0, &ind);
           
-          if (ind == 0) { // diagonal cell is max, set bits to 0b00001100
-                H_temp = H_temp | 4;     // set bit 0b00000100
-                H_temp = H_temp | 8;     // set bit 0b00001000
-                //printf("\\");
-            } else if (ind == 1) {       // left cell is max, set bits to 0b00001000
-                H_temp = H_temp & (~4);  // clear bit
-                H_temp = H_temp | 8;     // set bit 0b00001000
-                 //printf("-");
-            } else if (ind == 2) {       // top cell is max, set bits to 0b00000100
-                H_temp = H_temp & (~8);  //clear bit
-                H_temp = H_temp | 4;     // set bit 0b00000100
-                 //printf("|");
-            } else {                     // score is 0, set bits to 0b00000000
-                H_temp = H_temp & (~8);  //clear bit
-                H_temp = H_temp & (~4);  //clear bit
-                 //printf("*");
-          }
+  //         if (ind == 0) { // diagonal cell is max, set bits to 0b00001100
+  //               H_temp = H_temp | 4;     // set bit 0b00000100
+  //               H_temp = H_temp | 8;     // set bit 0b00001000
+  //               //printf("\\");
+  //           } else if (ind == 1) {       // left cell is max, set bits to 0b00001000
+  //               H_temp = H_temp & (~4);  // clear bit
+  //               H_temp = H_temp | 8;     // set bit 0b00001000
+  //                //printf("-");
+  //           } else if (ind == 2) {       // top cell is max, set bits to 0b00000100
+  //               H_temp = H_temp & (~8);  //clear bit
+  //               H_temp = H_temp | 4;     // set bit 0b00000100
+  //                //printf("|");
+  //           } else {                     // score is 0, set bits to 0b00000000
+  //               H_temp = H_temp & (~8);  //clear bit
+  //               H_temp = H_temp & (~4);  //clear bit
+  //                //printf("*");
+  //         }
           
-          H_ptr[diagOffset[diagId] + locOffset] =  H_temp;
+  //         H_ptr[diagOffset[diagId] + locOffset] =  H_temp;
       
-          //thread_max_i = (thread_max >= _curr_H) ? thread_max_i : i;
-          //thread_max_j = (thread_max >= _curr_H) ? thread_max_j : thread_Id;
-          //thread_max   = (thread_max >= _curr_H) ? thread_max : _curr_H;
+  //         //thread_max_i = (thread_max >= _curr_H) ? thread_max_i : i;
+  //         //thread_max_j = (thread_max >= _curr_H) ? thread_max_j : thread_Id;
+  //         //thread_max   = (thread_max >= _curr_H) ? thread_max : _curr_H;
         
-	  if (_curr_H > thread_max) {
-	  	thread_max_i = i;
-		thread_max_j = thread_Id;
-		thread_max = _curr_H;
-	  }
-          i++;
-       }
-      __syncthreads(); 
-    }
-    __syncthreads();
+	//   if (_curr_H > thread_max) {
+	//   	thread_max_i = i;
+	// 	thread_max_j = thread_Id;
+	// 	thread_max = _curr_H;
+	//   }
+  //         i++;
+  //      }
+  //     __syncthreads(); 
+  //   }
+  //   __syncthreads();
 
-    thread_max = blockShuffleReduce_with_index(thread_max, thread_max_i, thread_max_j, minSize);  // thread 0 will have the correct values
+  //   thread_max = blockShuffleReduce_with_index(thread_max, thread_max_i, thread_max_j, minSize);  // thread 0 will have the correct values
     
-    if(thread_Id == 0)
-    {
-        short current_i = thread_max_i;
-        short current_j = thread_max_j;
+  //   if(thread_Id == 0)
+  //   {
+  //       short current_i = thread_max_i;
+  //       short current_j = thread_max_j;
       
-        if(lengthSeqA < lengthSeqB)
-        {
-          seqB_align_end[block_Id] = thread_max_i;
-          seqA_align_end[block_Id] = thread_max_j;
-          top_scores[block_Id] = thread_max;
-        }
-        else
-        {
-          seqA_align_end[block_Id] = thread_max_i;
-          seqB_align_end[block_Id] = thread_max_j;
-          top_scores[block_Id] = thread_max;
-        }
+  //       if(lengthSeqA < lengthSeqB)
+  //       {
+  //         seqB_align_end[block_Id] = thread_max_i;
+  //         seqA_align_end[block_Id] = thread_max_j;
+  //         top_scores[block_Id] = thread_max;
+  //       }
+  //       else
+  //       {
+  //         seqA_align_end[block_Id] = thread_max_i;
+  //         seqB_align_end[block_Id] = thread_max_j;
+  //         top_scores[block_Id] = thread_max;
+  //       }
         
-        gpu_bsw::traceBack(current_i, current_j, seqA_array, seqB_array, prefix_lengthA, 
-                    prefix_lengthB, seqA_align_begin, seqA_align_end,
-                    seqB_align_begin, seqB_align_end, maxMatrixSize, maxCIGAR,
-                    longCIGAR, CIGAR, H_ptr, diagOffset);
+  //       gpu_bsw::traceBack(current_i, current_j, seqA_array, seqB_array, prefix_lengthA, 
+  //                   prefix_lengthB, seqA_align_begin, seqA_align_end,
+  //                   seqB_align_begin, seqB_align_end, maxMatrixSize, maxCIGAR,
+  //                   longCIGAR, CIGAR, H_ptr, diagOffset);
 
-    }
+  //   }
     __syncthreads();
 }
 
